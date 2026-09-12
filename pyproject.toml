@@ -1,0 +1,23 @@
+[project]
+name = "ml-slm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "datasets>=5.0.1",
+    "flash-attn-4[cu13]>=4.0.0b29",
+    "huggingface-hub>=1.30.0",
+    "numpy>=2.5.3",
+    "tokenizers>=0.23.2",
+    "torch>=2.14.0",
+    "torchinfo>=1.8.0",
+    "tqdm>=4.70.0",
+]
+
+[project.scripts]
+ml-slm = "ml_slm:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
