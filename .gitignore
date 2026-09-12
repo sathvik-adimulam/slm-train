@@ -13,5 +13,8 @@ final_data/
 #Environment Variables
 .env 
 
+#Jupyter notebooks 
+*.ipynb
+
 # Virtual environments
 .venv
