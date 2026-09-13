@@ -8,7 +8,7 @@ wheels/
 
 #Data 
 data/
-final_data/
+shards/
 
 #Environment Variables
 .env 
