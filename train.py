@@ -1,6 +1,7 @@
 import inspect
 import math
 import os
+import threading 
 import time
 import warnings
 from dataclasses import dataclass
@@ -8,13 +9,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from decoder import get_model
 
 warnings.filterwarnings("ignore")
-
 
 class DataLoader:
     def __init__(self, B, T, process_rank, num_processes, base_dir, split):
@@ -69,7 +68,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 ddp = int(os.environ.get("RANK", -1)) != -1
 if ddp:
-    assert torch.cuda.is_available(), "for now i think we need CUDA for DDP"
+    assert torch.cuda.is_available(), "CUDA needed for DDP"
     init_process_group(backend="nccl")
     ddp_rank = int(os.environ["RANK"])
     ddp_local_rank = int(os.environ["LOCAL_RANK"])
@@ -92,8 +91,9 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-total_batch_size = 524288
-B = 16
+#Gradient accumulation 
+total_batch_size = 524288 #2**19
+B = 64
 T = 1024
 assert total_batch_size % (B * T) == 0, "make sure total batch size is divisible bu B*T"
 grad_accum_steps = total_batch_size // (B * T)
@@ -102,7 +102,7 @@ if master_process:
     print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
 if "RUNPOD_POD_ID" in os.environ:
-    base_dir = Path("")
+    base_dir = Path("workspace/shards")
 else:
     base_dir = Path("shards")
 
@@ -188,33 +188,27 @@ def configure_optimizer(model, weight_decay, learning_rate, device):
     return optimizer
 
 
-# Training loop
+# Load optimizer
 optimizer = configure_optimizer(
     model=model, weight_decay=0.1, learning_rate=3e-4, device=device
 )
 
-for step in range(max_steps):
-    # Val loop
-    if step % 100 == 0 or step == max_steps - 1:
-        model.eval()
-        val_loader.reset()
-        with torch.no_grad():
-            val_loss_accum = 0.0
-            val_loss_steps = max(1, total_val_tokens // total_batch_size + 1)
-            for _ in range(val_loss_steps):
-                x, y = val_loader.next_batch()
-                x, y = x.to(device), y.to(device)
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                    logits = model(x)
-                    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
-                loss /= val_loss_steps
-                val_loss_accum += loss.detach()
-            if ddp:
-                dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
-            if master_process:
-                print(f"validation_loss: {val_loss_accum.item():.4f}")
-        model.train()
+def save_checkpoint(model, optimizer, loss_accum, val_loss_accum, dir):
+    checkpoint = {
+        "step": step,
+        "model_state_dict": model.module.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "train_loss": loss_accum,
+        "val_loss": val_loss_accum,
+    }
 
+    tmp_path = dir / "best_checkpoint.pt.tmp"
+    path = dir / "best_checkpoint.pt"
+    torch.save(checkpoint, tmp_path)
+    os.replace(tmp_path, path)
+
+best_val_loss = float("inf")
+for step in range(max_steps):
     # Train loop
     t0 = time.perf_counter()
     optimizer.zero_grad()
@@ -245,3 +239,37 @@ for step in range(max_steps):
     print(
         f"Step {step + 1}, Loss: {loss_accum.item():.6f}, LR: {lr:.4e}, Norm: {norm:.4f}, Time: {dt:.2f}ms"
     )
+
+    # Val loop
+    if step % 250 == 0 or step == max_steps - 1:
+        model.eval()
+        val_loader.reset()
+        with torch.no_grad():
+            val_loss_accum = 0.0
+            val_loss_steps = max(1, total_val_tokens // total_batch_size + 1)
+            for _ in range(val_loss_steps):
+                x, y = val_loader.next_batch()
+                x, y = x.to(device), y.to(device)
+                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                    logits = model(x)
+                    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
+                loss /= val_loss_steps
+                val_loss_accum += loss.detach()
+            if ddp:
+                dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+            if master_process:
+                print(f"validation_loss: {val_loss_accum.item():.4f}")
+                
+                # Save checkpoint
+                if val_loss_accum < best_val_loss:
+                    best_val_loss = val_loss_accum
+                    save_thread = threading.Thread(
+                        target=save_checkpoint,
+                        args=(model, optimizer, loss_accum, val_loss_accum, base_dir.parent)
+                    )
+                    save_thread.start()
+       model.train()
+
+if ddp:
+    dist.barrier()
+    destroy_process_group()
