@@ -139,8 +139,9 @@ def get_total_tokens(base_dir, split):
         arr = np.memmap(file, dtype=np.uint16, mode="r")
         num_tokens = arr.size
         total_tokens += num_tokens
-
-    print(f"total tokens in {split}: {total_tokens:,}")
+    
+    if master_process:
+        print(f"total tokens in {split}: {total_tokens:,}")
     return total_tokens
 
 #Calculate optimal learning rate schedule and num steps
@@ -173,12 +174,13 @@ def configure_optimizer(model, weight_decay, learning_rate, device):
     nodecay_params = [p for p in model.parameters() if p.dim() < 2]
     num_decay_params = sum(p.numel() for p in decay_params)
     num_nodecay_params = sum(p.numel() for p in nodecay_params)
-    print(
-        f"num decayed parameters tensors: {len(decay_params)}, with {num_decay_params:,} params"
-    )
-    print(
-        f"num non-decayed parameters tensors: {len(nodecay_params)}, with {num_nodecay_params:,} params"
-    )
+    if master_process:
+        print(
+            f"num decayed parameters tensors: {len(decay_params)}, with {num_decay_params:,} params"
+        )
+        print(
+            f"num non-decayed parameters tensors: {len(nodecay_params)}, with {num_nodecay_params:,} params"
+        )
 
     optim_groups = [
         {"params": decay_params, "weight_decay": weight_decay},
@@ -187,7 +189,8 @@ def configure_optimizer(model, weight_decay, learning_rate, device):
     # Create fusex AdamW optimizer
     fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
     use_fused = fused_available and "cuda" in device
-    print(f"using fused AdamW: {use_fused}")
+    if master_process:
+        print(f"using fused AdamW: {use_fused}")
     optimizer = torch.optim.AdamW(
         optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused
     )
@@ -242,9 +245,10 @@ for step in range(max_steps):
         torch.cuda.synchronize()
     t1 = time.perf_counter()
     dt = (t1 - t0) * 1000
-    print(
-        f"Step {step + 1}/{max_steps}, Loss: {loss_accum.item():.6f}, LR: {lr:.4e}, Norm: {norm:.4f}, Time: {dt:.2f}ms"
-    )
+    if master_process:
+        print(
+            f"Step {step + 1}/{max_steps}, Loss: {loss_accum.item():.6f}, LR: {lr:.4e}, Norm: {norm:.4f}, Time: {dt:.2f}ms"
+        )
 
     # Val loop
     last_step = step == max_steps - 1
