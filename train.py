@@ -102,8 +102,8 @@ if master_process:
     print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
 if "RUNPOD_POD_ID" in os.environ:
-    base_dir = Path("workspace/shards")
-    checkpoint_dir = Path("workspace/checkpoints")
+    base_dir = Path.home() / "workspace" / "shards"
+    checkpoint_dir = Path.home() / "workspace" / "checkpoints
 else:
     base_dir = Path("shards")
     checkpoint_dir = Path("checkpoints")
