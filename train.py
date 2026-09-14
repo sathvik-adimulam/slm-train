@@ -85,7 +85,6 @@ else:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"using device: {device}")
 
-device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 torch.manual_seed(1337)
 if torch.cuda.is_available():
@@ -95,15 +94,15 @@ if torch.cuda.is_available():
 total_batch_size = 524288 #2**19
 B = 64
 T = 1024
-assert total_batch_size % (B * T) == 0, "make sure total batch size is divisible bu B*T"
-grad_accum_steps = total_batch_size // (B * T)
+assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total batch size is divisible bu B*T"
+grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
     print(f"total desired batch size: {total_batch_size}")
     print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
 if "RUNPOD_POD_ID" in os.environ:
-    base_dir = Path.home() / "workspace" / "shards"
-    checkpoint_dir = Path.home() / "workspace" / "checkpoints"
+    base_dir = Path("/workspace/shards")
+    checkpoint_dir = Path("/workspace/checkpoints")
 else:
     base_dir = Path("shards")
     checkpoint_dir = Path("checkpoints")
@@ -119,9 +118,9 @@ val_loader = DataLoader(B, T, ddp_rank, ddp_world_size, base_dir, "val")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 config = DecoderConfig()
 model = get_model(config).to(device)
+model = torch.compile(model, dynamic=True)
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
-model = torch.compile(model, dynamic=True)
 
 
 def get_total_tokens(base_dir, split):
@@ -201,9 +200,10 @@ optimizer = configure_optimizer(
 )
 
 def save_checkpoint(model, optimizer, step, loss_accum, val_loss_accum, dir):
+    raw_model = model.module if ddp else model
     checkpoint = {
         "step": step,
-        "model_state_dict": model.module.state_dict(),
+        "model_state_dict": raw_model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "train_loss": loss_accum,
         "val_loss": val_loss_accum,
@@ -269,11 +269,7 @@ for step in range(max_steps):
                 
                 # Save checkpoint
                 if step % 5000 == 0 or last_step:
-                    save_thread = threading.Thread(
-                        target=save_checkpoint,
-                        args=(model, optimizer, step, loss_accum, val_loss_accum, checkpoint_dir)
-                    )
-                    save_thread.start()
+                    save_checkpoint(model, optimizer, step, loss_accum, val_loss_accum, checkpoint_dir)
         model.train()
 
 if ddp:
