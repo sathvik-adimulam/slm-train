@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "boto3>=1.43.93",
     "datasets>=5.0.1",
     "flash-attn-4[cu13]>=4.0.0b29",
     "huggingface-hub>=1.30.0",

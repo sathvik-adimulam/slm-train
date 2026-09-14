@@ -103,18 +103,25 @@ if master_process:
 
 if "RUNPOD_POD_ID" in os.environ:
     base_dir = Path("workspace/shards")
+    checkpoint_dir = Path("workspace/checkpoints")
 else:
     base_dir = Path("shards")
+    checkpoint_dir = Path("checkpoints")
 
+base_dir.mkdir(parents=True, exist_ok=True)
+checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+#Load train and val data
 train_loader = DataLoader(B, T, ddp_rank, ddp_world_size, base_dir, "train")
 val_loader = DataLoader(B, T, ddp_rank, ddp_world_size, base_dir, "val")
 
+#Load model on right device
 device = "cuda" if torch.cuda.is_available() else "cpu"
 config = DecoderConfig()
 model = get_model(config).to(device)
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
-model = torch.compile(model)
+model = torch.compile(model, dynamic=True)
 
 
 def get_total_tokens(base_dir, split):
@@ -137,7 +144,7 @@ def get_total_tokens(base_dir, split):
     print(f"total tokens in {split}: {total_tokens:,}")
     return total_tokens
 
-
+#Calculate optimal learning rate schedule and num steps
 total_train_tokens = get_total_tokens(base_dir, "train")
 total_val_tokens = get_total_tokens(base_dir, "val")
 max_lr = 3e-4
@@ -193,7 +200,7 @@ optimizer = configure_optimizer(
     model=model, weight_decay=0.1, learning_rate=3e-4, device=device
 )
 
-def save_checkpoint(model, optimizer, loss_accum, val_loss_accum, dir):
+def save_checkpoint(model, optimizer, step, loss_accum, val_loss_accum, dir):
     checkpoint = {
         "step": step,
         "model_state_dict": model.module.state_dict(),
@@ -202,12 +209,11 @@ def save_checkpoint(model, optimizer, loss_accum, val_loss_accum, dir):
         "val_loss": val_loss_accum,
     }
 
-    tmp_path = dir / "best_checkpoint.pt.tmp"
-    path = dir / "best_checkpoint.pt"
+    tmp_path = dir / f"{step}_checkpoint.pt.tmp"
+    path = dir / f"{step}_checkpoint.pt"
     torch.save(checkpoint, tmp_path)
     os.replace(tmp_path, path)
 
-best_val_loss = float("inf")
 for step in range(max_steps):
     # Train loop
     t0 = time.perf_counter()
@@ -237,11 +243,12 @@ for step in range(max_steps):
     t1 = time.perf_counter()
     dt = (t1 - t0) * 1000
     print(
-        f"Step {step + 1}, Loss: {loss_accum.item():.6f}, LR: {lr:.4e}, Norm: {norm:.4f}, Time: {dt:.2f}ms"
+        f"Step {step + 1}/{max_steps}, Loss: {loss_accum.item():.6f}, LR: {lr:.4e}, Norm: {norm:.4f}, Time: {dt:.2f}ms"
     )
 
     # Val loop
-    if step % 250 == 0 or step == max_steps - 1:
+    last_step = step == max_steps - 1
+    if step % 250 == 0 or last_step:
         model.eval()
         val_loader.reset()
         with torch.no_grad():
@@ -261,11 +268,10 @@ for step in range(max_steps):
                 print(f"validation_loss: {val_loss_accum.item():.4f}")
                 
                 # Save checkpoint
-                if val_loss_accum < best_val_loss:
-                    best_val_loss = val_loss_accum
+                if step % 5000 == 0 or last_step:
                     save_thread = threading.Thread(
                         target=save_checkpoint,
-                        args=(model, optimizer, loss_accum, val_loss_accum, base_dir.parent)
+                        args=(model, optimizer, step, loss_accum, val_loss_accum, checkpoint_dir)
                     )
                     save_thread.start()
        model.train()
