@@ -103,7 +103,7 @@ if master_process:
 
 if "RUNPOD_POD_ID" in os.environ:
     base_dir = Path.home() / "workspace" / "shards"
-    checkpoint_dir = Path.home() / "workspace" / "checkpoints
+    checkpoint_dir = Path.home() / "workspace" / "checkpoints"
 else:
     base_dir = Path("shards")
     checkpoint_dir = Path("checkpoints")
@@ -274,7 +274,7 @@ for step in range(max_steps):
                         args=(model, optimizer, step, loss_accum, val_loss_accum, checkpoint_dir)
                     )
                     save_thread.start()
-       model.train()
+        model.train()
 
 if ddp:
     dist.barrier()
