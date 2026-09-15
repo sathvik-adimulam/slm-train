@@ -10,6 +10,7 @@ from tokenizers import (
     trainers,
 )
 
+#Create Byte-Level BPE tokenizer with custom regex and EOS token at end
 regex_pattern = r"’(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}++|\p{N}{1,3}+| ?[^\s\p{L}\p{N}]++[\r\n]*+|\s++$|\s*[\r\n]|\s+(?!\S)|\s~"
 tokenizer = Tokenizer(models.BPE())
 tokenizer.normalizer = normalizers.NFC()
@@ -28,7 +29,7 @@ trainer = trainers.BpeTrainer(
     show_progress=True,
 )
 
-
+#Fetch 3gb subset with 7:2:1 code:text:math ratio
 ds_py = load_from_disk("data/python")
 ds_jupyter_scripts = load_from_disk("data/jupyter-scripts-dedup-filtered/")
 ds_jupyter_struct = load_from_disk("data/jupyter-structured-clean-dedup")

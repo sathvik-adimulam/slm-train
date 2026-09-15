@@ -116,6 +116,7 @@ class CausalSelfAttention(nn.Module):
 class SwiGLU(nn.Module):
     def __init__(self, in_dim, hidden_dim):
         super().__init__()
+        #Weights
         self.w1 = nn.Linear(in_dim, hidden_dim, bias=False)  # gate
         self.w3 = nn.Linear(in_dim, hidden_dim, bias=False)  # value
         self.w2 = nn.Linear(hidden_dim, in_dim, bias=False)  # down-proj
@@ -129,7 +130,6 @@ class SwiGLU(nn.Module):
 class DecoderBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-
         self.rn1 = nn.RMSNorm(config.n_embd)
         self.mha = CausalSelfAttention(config)
         self.rn2 = nn.RMSNorm(config.n_embd)
@@ -155,7 +155,8 @@ class Decoder(nn.Module):
         self.linear = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         self.apply(self._init_weights)
-
+    
+    # Use normal initialization (with scale factor for layers at end of residual branch) instead of kaiming uniform
     def _init_weights(self, module):
         std = 0.02
         if isinstance(module, nn.Linear):

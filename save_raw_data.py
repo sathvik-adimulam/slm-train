@@ -20,15 +20,6 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 login(HF_TOKEN)
 
 
-# =============================================================================
-# Jupyter magic stripping
-#
-# Jupyter cells may contain magic syntax (%, %%, !) that is not valid Python.
-# These helpers strip magics from a cell's source while leaving genuine code
-# (including magic-looking text inside multi-line strings) untouched, so the
-# remaining source can be validated with ast.parse.
-# =============================================================================
-
 
 def _protected_lines(source: str) -> set[int]:
     """
@@ -63,14 +54,8 @@ def _is_magic_line(line: str) -> bool:
         or stripped.startswith("!")
     )
 
-
+#Remove magic methods from jupyter cell
 def strip_magics(source: str) -> str:
-    """
-    Remove Jupyter magic lines from `source`, leaving all other lines
-    (including magic-looking text inside multi-line strings) intact. Removed
-    magics are replaced with blank lines so remaining line numbers are
-    preserved. Raises SyntaxError if a non-magic syntax error is found.
-    """
     lines = source.splitlines(keepends=True)
     if not lines:
         return source
@@ -107,26 +92,16 @@ def strip_magics(source: str) -> str:
             # are unaffected.
             lines[idx] = "\n" if line.endswith("\n") else ""
 
-
+#validate syntax with AST
 def validate_cell(source: str) -> tuple[bool, str]:
-    """
-    Strip magics from `source` and validate the result with ast.parse.
-    Returns (is_valid, message): on success, message is the cleaned source;
-    on failure, message is None.
-    """
     try:
         cleaned = strip_magics(source)
         return True, cleaned
     except SyntaxError:
         return False, None
 
-
+#Clean jupyter cell
 def clean_cell(source: str) -> str | None:
-    """
-    Return magic-free source suitable for a training corpus, or None if the
-    cell contributes no usable standalone code (a %% cell magic, blank
-    remainder, or code that still fails ast.parse after stripping).
-    """
     is_valid, cleaned = validate_cell(source)
     if not is_valid:
         return None
@@ -135,12 +110,6 @@ def clean_cell(source: str) -> str | None:
     return cleaned
 
 
-# =============================================================================
-# Per-sample processors
-#
-# Each function takes a raw dataset sample and returns {"content": ..., "status": ...},
-# where status=1 marks the sample as usable and status=0 marks it for filtering.
-# =============================================================================
 
 cell_pattern = re.compile(
     r"(<jupyter_start>|<jupyter_text>|<jupyter_code>|<jupyter_output>|<empty_output>)"  # Group 1 (Tag)
@@ -245,7 +214,6 @@ def gen(ds, target_size, output_dir):
 if __name__ == "__main__":
     num_workers = os.cpu_count() or 1
 
-    """
     # Process jupyter notebooks
     ds_jupyter_structured = load_dataset(
         "bigcode/starcoderdata",
@@ -287,7 +255,6 @@ if __name__ == "__main__":
     )
 
     processed_ds_py.save_to_disk(output_dir_py)
-    """
 
     target_size_text = 9 * 1024**3
     target_size_math = 4.5 * 1024**3
