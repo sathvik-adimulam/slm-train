@@ -9,7 +9,7 @@ wheels/
 #Data 
 data/
 shards/
-
+checkpoints/
 #Environment Variables
 .env 
 

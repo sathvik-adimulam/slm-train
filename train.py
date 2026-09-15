@@ -1,7 +1,7 @@
 import inspect
 import math
 import os
-import threading 
+import threading
 import time
 import warnings
 from dataclasses import dataclass
@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from decoder import get_model
 
 warnings.filterwarnings("ignore")
+
 
 class DataLoader:
     def __init__(self, B, T, process_rank, num_processes, base_dir, split):
@@ -54,7 +55,7 @@ class DataLoader:
 
 @dataclass
 class DecoderConfig:
-    seq_len: int = 4096
+    seq_len: int = 1024
     vocab_size: int = 50304
     n_blocks: int = 36
     n_head: int = 16
@@ -90,11 +91,13 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-#Gradient accumulation 
-total_batch_size = 524288 #2**19
+# Gradient accumulation
+total_batch_size = 524288  # 2**19
 B = 64
 T = 1024
-assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total batch size is divisible bu B*T"
+assert total_batch_size % (B * T * ddp_world_size) == 0, (
+    "make sure total batch size is divisible bu B*T"
+)
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
     print(f"total desired batch size: {total_batch_size}")
@@ -110,11 +113,11 @@ else:
 base_dir.mkdir(parents=True, exist_ok=True)
 checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-#Load train and val data
+# Load train and val data
 train_loader = DataLoader(B, T, ddp_rank, ddp_world_size, base_dir, "train")
 val_loader = DataLoader(B, T, ddp_rank, ddp_world_size, base_dir, "val")
 
-#Load model on right device
+# Load model on right device
 device = "cuda" if torch.cuda.is_available() else "cpu"
 config = DecoderConfig()
 model = get_model(config).to(device)
@@ -139,12 +142,13 @@ def get_total_tokens(base_dir, split):
         arr = np.memmap(file, dtype=np.uint16, mode="r")
         num_tokens = arr.size
         total_tokens += num_tokens
-    
+
     if master_process:
         print(f"total tokens in {split}: {total_tokens:,}")
     return total_tokens
 
-#Calculate optimal learning rate schedule and num steps
+
+# Calculate optimal learning rate schedule and num steps
 total_train_tokens = get_total_tokens(base_dir, "train")
 total_val_tokens = get_total_tokens(base_dir, "val")
 max_lr = 3e-4
@@ -202,6 +206,7 @@ optimizer = configure_optimizer(
     model=model, weight_decay=0.1, learning_rate=3e-4, device=device
 )
 
+
 def save_checkpoint(model, optimizer, step, loss_accum, val_loss_accum, dir):
     raw_model = model.module if ddp else model
     checkpoint = {
@@ -216,6 +221,7 @@ def save_checkpoint(model, optimizer, step, loss_accum, val_loss_accum, dir):
     path = dir / f"{step}_checkpoint.pt"
     torch.save(checkpoint, tmp_path)
     os.replace(tmp_path, path)
+
 
 for step in range(max_steps):
     # Train loop
@@ -270,10 +276,17 @@ for step in range(max_steps):
                 dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
             if master_process:
                 print(f"validation_loss: {val_loss_accum.item():.4f}")
-                
+
                 # Save checkpoint
                 if step % 5000 == 0 or last_step:
-                    save_checkpoint(model, optimizer, step, loss_accum, val_loss_accum, checkpoint_dir)
+                    save_checkpoint(
+                        model,
+                        optimizer,
+                        step,
+                        loss_accum,
+                        val_loss_accum,
+                        checkpoint_dir,
+                    )
         model.train()
 
 if ddp:
